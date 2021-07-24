@@ -1,23 +1,44 @@
-import { Get } from '@nestjs/common';
+import { Get, OnModuleInit } from '@nestjs/common';
 import { Body, Controller, Post } from '@nestjs/common';
+import { Client, ClientKafka, Transport } from '@nestjs/microservices';
 import { ApiBody } from '@nestjs/swagger';
+import { Observable } from 'rxjs';
 import { UserEntity } from './databases/user.entity';
 import { UserDto } from './dto/user.dto';
-import { User } from './interfaces/user.interface';
-import { UsersService } from './users.service';
 
 @Controller('users')
-export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+export class UsersController implements OnModuleInit {
+  @Client({
+    transport: Transport.KAFKA,
+    options: {
+      client: {
+        clientId: 'user',
+        brokers: ['localhost:9092'],
+      },
+      consumer: {
+        groupId: 'user-consumer',
+        allowAutoTopicCreation: true,
+      },
+    },
+  })
+  private client: ClientKafka;
+  async onModuleInit() {
+    const requestPatters = ['find-all-user', 'create-user'];
+
+    requestPatters.forEach(async (pattern) => {
+      this.client.subscribeToResponseOf(pattern);
+      await this.client.connect();
+    });
+  }
 
   @Get()
-  async index(): Promise<UserEntity[]> {
-    return await this.usersService.findAll();
+  index(): Observable<UserEntity[]> {
+    return this.client.send('find-all-user', {});
   }
 
   @Post()
   @ApiBody({ type: UserDto })
-  async create(@Body() user: UserDto): Promise<UserEntity> {
-    return await this.usersService.create(user);
+  create(@Body() user: UserDto): Observable<UserEntity> {
+    return this.client.send('create-user', user);
   }
 }
